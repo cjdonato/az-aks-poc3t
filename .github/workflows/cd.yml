@@ -73,6 +73,12 @@ jobs:
             exit 0
           fi
           echo "provisioned=true" >> "$GITHUB_OUTPUT"
+          # Public repo: hide globally unique resource names and IDs in the logs.
+          # (Generic values like "poc3t-rg" or "app" are left alone; masking them
+          # would garble every log line containing those words.)
+          for key in acr_name acr_login_server key_vault_name postgres_host backend_identity_client_id; do
+            echo "::add-mask::$(jq -r --arg k "$key" '.[$k].value' "$RUNNER_TEMP/tf.json")"
+          done
           # Export each output as TF_<NAME> for the following steps.
           jq -r 'to_entries[] | "TF_\(.key | ascii_upcase)=\(.value.value)"' "$RUNNER_TEMP/tf.json" >> "$GITHUB_ENV"
 
@@ -116,6 +122,8 @@ jobs:
           version: v4.3.0
       - uses: azure/use-kubelogin@v1
         if: steps.tf.outputs.provisioned == 'true'
+        with:
+          kubelogin-version: v0.2.20
       - name: Get AKS credentials (Entra ID)
         if: steps.tf.outputs.provisioned == 'true'
         run: |

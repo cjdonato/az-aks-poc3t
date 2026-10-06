@@ -10,14 +10,20 @@ output "aks_name" {
 
 output "acr_name" {
   value = azurerm_container_registry.main.name
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
 }
 
 output "acr_login_server" {
   value = azurerm_container_registry.main.login_server
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
 }
 
 output "key_vault_name" {
   value = azurerm_key_vault.main.name
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
 }
 
 output "tenant_id" {
@@ -26,6 +32,8 @@ output "tenant_id" {
 
 output "postgres_host" {
   value = azurerm_postgresql_flexible_server.main.fqdn
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
 }
 
 output "postgres_user" {
@@ -42,6 +50,8 @@ output "postgres_password_secret_name" {
 
 output "backend_identity_client_id" {
   value = azurerm_user_assigned_identity.backend.client_id
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
 }
 
 output "app_namespace" {
