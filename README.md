@@ -13,7 +13,7 @@ A proof-of-concept three-tier web app, built and deployed to AKS by GitHub Actio
 ```
 frontend/        React app, nginx config, Dockerfile
 backend/         Express API, SQL migrations, tests, Dockerfile
-infra/           Terraform for Azure resources            (phase 2)
+infra/           Bootstrap script + Terraform for Azure (see infra/README.md)
 deploy/helm/     Helm chart for the app                   (phase 3)
 .github/         CI/CD workflows                          (phase 4)
 docker-compose.yml   Local run of all three tiers
@@ -62,7 +62,7 @@ cd backend && npm test
 ## Roadmap
 
 1. ✅ App scaffold + local docker-compose
-2. Terraform: resource group, ACR, AKS, PostgreSQL Flexible Server, Key Vault, GitHub OIDC
-3. Helm chart: deployments, services, ingress, probes, secrets
+2. ✅ Terraform: VNet, ACR, AKS, PostgreSQL Flexible Server (private), Key Vault, GitHub OIDC bootstrap
+3. Helm chart: deployments, services, LoadBalancer (or Gateway API), probes, Key Vault secrets
 4. GitHub Actions: CI (test/build), CD (push to ACR, `helm upgrade`), infra (plan/apply), destroy
 5. End-to-end verification and teardown
