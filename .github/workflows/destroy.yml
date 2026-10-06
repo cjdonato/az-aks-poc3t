@@ -39,15 +39,11 @@ jobs:
         working-directory: infra/terraform
     steps:
       - uses: actions/checkout@v7
-      - uses: hashicorp/setup-terraform@v4
+      - uses: ./.github/actions/terraform-init
         with:
-          terraform_version: 1.16.5
-          terraform_wrapper: false
-      - name: terraform init
-        run: >
-          terraform init
-          -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}"
-          -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
-          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
-          -backend-config="key=${{ secrets.TFSTATE_KEY }}"
-      - run: terraform destroy -no-color -auto-approve
+          resource-group: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+          storage-account: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
+          container: ${{ secrets.TFSTATE_CONTAINER }}
+          key: ${{ secrets.TFSTATE_KEY }}
+      # Public repo: resource IDs in progress lines are redacted.
+      - run: terraform destroy -no-color -auto-approve | sed -E 's/\[id=[^]]*\]/[id=<redacted>]/'

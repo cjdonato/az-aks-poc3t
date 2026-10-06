@@ -1,0 +1,52 @@
+name: Terraform init
+description: >
+  Install Terraform, init the azurerm backend in infra/terraform, and mask this
+  environment's unique identifiers so they don't appear in public logs.
+  Expects ARM_USE_OIDC / ARM_CLIENT_ID / ARM_TENANT_ID / ARM_SUBSCRIPTION_ID in env.
+
+inputs:
+  resource-group:
+    description: Terraform state resource group
+    required: true
+  storage-account:
+    description: Terraform state storage account
+    required: true
+  container:
+    description: Terraform state container
+    required: true
+  key:
+    description: Terraform state blob name
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: 1.16.5
+        terraform_wrapper: false
+
+    - name: terraform init
+      shell: bash
+      working-directory: infra/terraform
+      env:
+        TF_IN_AUTOMATION: "true"
+      run: |
+        terraform init -input=false -no-color \
+          -backend-config="resource_group_name=${{ inputs.resource-group }}" \
+          -backend-config="storage_account_name=${{ inputs.storage-account }}" \
+          -backend-config="container_name=${{ inputs.container }}" \
+          -backend-config="key=${{ inputs.key }}"
+
+    # The random name suffix appears in every globally unique resource name
+    # (ACR, Key Vault, Postgres), so masking it hides all of them; the full names
+    # are masked too in case the state predates the name_suffix output.
+    - name: Mask environment identifiers
+      shell: bash
+      working-directory: infra/terraform
+      run: |
+        terraform output -json | jq -r '
+          [.name_suffix, .acr_name, .acr_login_server, .key_vault_name,
+           .postgres_host, .backend_identity_client_id][]
+          | .value // empty' \
+          | while read -r value; do echo "::add-mask::$value"; done

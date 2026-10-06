@@ -65,3 +65,10 @@ output "backend_service_account" {
 output "gateway_api_enabled" {
   value = var.enable_gateway_api
 }
+
+# Random suffix shared by the globally unique resource names. Workflows mask it
+# so those names stay out of public logs.
+output "name_suffix" {
+  value     = local.suffix
+  sensitive = true
+}

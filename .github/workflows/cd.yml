@@ -53,19 +53,16 @@ jobs:
       - uses: actions/checkout@v7
 
       # --- Read infrastructure details from Terraform state -------------------
-      - uses: hashicorp/setup-terraform@v4
+      - uses: ./.github/actions/terraform-init
         with:
-          terraform_version: 1.16.5
-          terraform_wrapper: false
+          resource-group: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+          storage-account: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
+          container: ${{ secrets.TFSTATE_CONTAINER }}
+          key: ${{ secrets.TFSTATE_KEY }}
       - name: Read Terraform outputs
         id: tf
         working-directory: infra/terraform
         run: |
-          terraform init -input=false \
-            -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}" \
-            -backend-config="key=${{ secrets.TFSTATE_KEY }}" > /dev/null
           terraform output -json > "$RUNNER_TEMP/tf.json"
           if [ "$(jq 'has("aks_name")' "$RUNNER_TEMP/tf.json")" != "true" ]; then
             echo "::notice::Infrastructure isn't provisioned yet; skipping deploy. Run the Infra workflow first."
@@ -73,12 +70,6 @@ jobs:
             exit 0
           fi
           echo "provisioned=true" >> "$GITHUB_OUTPUT"
-          # Public repo: hide globally unique resource names and IDs in the logs.
-          # (Generic values like "poc3t-rg" or "app" are left alone; masking them
-          # would garble every log line containing those words.)
-          for key in acr_name acr_login_server key_vault_name postgres_host backend_identity_client_id; do
-            echo "::add-mask::$(jq -r --arg k "$key" '.[$k].value' "$RUNNER_TEMP/tf.json")"
-          done
           # Export each output as TF_<NAME> for the following steps.
           jq -r 'to_entries[] | "TF_\(.key | ascii_upcase)=\(.value.value)"' "$RUNNER_TEMP/tf.json" >> "$GITHUB_ENV"
 
