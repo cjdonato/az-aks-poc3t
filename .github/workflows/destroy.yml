@@ -1,0 +1,53 @@
+name: Destroy
+
+# Deletes everything Terraform created in the app resource group (AKS, Postgres,
+# ACR, Key Vault, network) to stop costs. The bootstrap resources (state storage,
+# CI identity, empty resource group) stay, so the Infra workflow can recreate it all.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "destroy" to delete the environment
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Terraform destroy
+    if: inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - name: terraform init
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
+          -backend-config="key=${{ secrets.TFSTATE_KEY }}"
+      - run: terraform destroy -no-color -auto-approve

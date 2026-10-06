@@ -1,0 +1,167 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - frontend/**
+      - backend/**
+      - deploy/**
+      - .github/workflows/cd.yml
+      - .github/workflows/ci.yml
+  # Redeploy after every successful infrastructure apply (e.g. the first one).
+  workflow_run:
+    workflows: [Infra]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-dev
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request')
+    uses: ./.github/workflows/ci.yml
+    with:
+      build-images: false
+
+  deploy:
+    name: Build, push and deploy
+    needs: test
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # --- Read infrastructure details from Terraform state -------------------
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - name: Read Terraform outputs
+        id: tf
+        working-directory: infra/terraform
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}" \
+            -backend-config="key=${{ secrets.TFSTATE_KEY }}" > /dev/null
+          terraform output -json > "$RUNNER_TEMP/tf.json"
+          if [ "$(jq 'has("aks_name")' "$RUNNER_TEMP/tf.json")" != "true" ]; then
+            echo "::notice::Infrastructure isn't provisioned yet; skipping deploy. Run the Infra workflow first."
+            echo "provisioned=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "provisioned=true" >> "$GITHUB_OUTPUT"
+          # Export each output as TF_<NAME> for the following steps.
+          jq -r 'to_entries[] | "TF_\(.key | ascii_upcase)=\(.value.value)"' "$RUNNER_TEMP/tf.json" >> "$GITHUB_ENV"
+
+      - name: Azure login (OIDC)
+        if: steps.tf.outputs.provisioned == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # --- Build and push images ---------------------------------------------
+      - name: Log in to ACR
+        if: steps.tf.outputs.provisioned == 'true'
+        run: az acr login --name "$TF_ACR_NAME"
+      - uses: docker/setup-buildx-action@v4
+        if: steps.tf.outputs.provisioned == 'true'
+      - name: Build and push backend
+        if: steps.tf.outputs.provisioned == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: true
+          tags: ${{ env.TF_ACR_LOGIN_SERVER }}/backend:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Build and push frontend
+        if: steps.tf.outputs.provisioned == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: true
+          tags: ${{ env.TF_ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # --- Deploy to AKS --------------------------------------------------------
+      - uses: azure/setup-helm@v5
+        if: steps.tf.outputs.provisioned == 'true'
+        with:
+          version: v4.3.0
+      - uses: azure/use-kubelogin@v1
+        if: steps.tf.outputs.provisioned == 'true'
+      - name: Get AKS credentials (Entra ID)
+        if: steps.tf.outputs.provisioned == 'true'
+        run: |
+          az aks get-credentials -g "$TF_RESOURCE_GROUP_NAME" -n "$TF_AKS_NAME" --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+      - name: helm upgrade --install
+        if: steps.tf.outputs.provisioned == 'true'
+        run: |
+          helm upgrade --install poc3t deploy/helm/poc3t \
+            --namespace "$TF_APP_NAMESPACE" --create-namespace \
+            --set image.registry="$TF_ACR_LOGIN_SERVER" \
+            --set image.tag="$IMAGE_TAG" \
+            --set postgres.host="$TF_POSTGRES_HOST" \
+            --set postgres.user="$TF_POSTGRES_USER" \
+            --set postgres.database="$TF_POSTGRES_DATABASE" \
+            --set keyVault.name="$TF_KEY_VAULT_NAME" \
+            --set keyVault.tenantId="$TF_TENANT_ID" \
+            --set keyVault.passwordSecretName="$TF_POSTGRES_PASSWORD_SECRET_NAME" \
+            --set workloadIdentity.clientId="$TF_BACKEND_IDENTITY_CLIENT_ID" \
+            --set backend.serviceAccountName="$TF_BACKEND_SERVICE_ACCOUNT" \
+            --set gateway.enabled="$TF_GATEWAY_API_ENABLED" \
+            --rollback-on-failure --timeout 10m
+      - name: Show pods on failure
+        if: failure() && steps.tf.outputs.provisioned == 'true'
+        run: |
+          kubectl -n "$TF_APP_NAMESPACE" get pods -o wide || true
+          kubectl -n "$TF_APP_NAMESPACE" describe pods | tail -60 || true
+          kubectl -n "$TF_APP_NAMESPACE" logs deploy/backend --tail=50 || true
+
+      # --- Smoke test through the public endpoint -------------------------------
+      - name: Smoke test
+        if: steps.tf.outputs.provisioned == 'true'
+        run: |
+          if [ "$TF_GATEWAY_API_ENABLED" = "true" ]; then
+            addr() { kubectl -n "$TF_APP_NAMESPACE" get gateway poc3t -o jsonpath='{.status.addresses[0].value}'; }
+          else
+            addr() { kubectl -n "$TF_APP_NAMESPACE" get svc frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; }
+          fi
+          for i in $(seq 1 30); do ip="$(addr)"; [ -n "$ip" ] && break; sleep 10; done
+          [ -n "$ip" ] || { echo "No public address assigned"; exit 1; }
+
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "http://$ip/" -o /dev/null
+          info="$(curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "http://$ip/api/info")"
+          curl -fsS "http://$ip/api/items" > /dev/null
+          echo "$info" | jq -e --arg v "$IMAGE_TAG" '.version == $v' > /dev/null \
+            || { echo "Unexpected version: $info"; exit 1; }
+
+          echo "### Deployed \`${IMAGE_TAG::7}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "App: http://$ip/" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,101 @@
+name: Infra
+
+on:
+  pull_request:
+    paths:
+      - infra/terraform/**
+      - .github/workflows/infra.yml
+  push:
+    branches: [main]
+    paths:
+      - infra/terraform/**
+      - .github/workflows/infra.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One Terraform run at a time against the shared state (also used by destroy.yml).
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+env:
+  # azurerm provider + backend authenticate through GitHub OIDC.
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+defaults:
+  run:
+    working-directory: infra/terraform
+
+jobs:
+  plan:
+    name: Terraform plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - name: terraform init
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
+          -backend-config="key=${{ secrets.TFSTATE_KEY }}"
+      - run: terraform validate
+      - run: terraform plan -no-color -out=tfplan
+      # Public repo: post only resource addresses and actions, never attribute values.
+      - name: Summarise plan on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "### Terraform plan"
+            echo '```'
+            terraform show -json tfplan | jq -r '
+              .resource_changes[]
+              | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+              | "\(.change.actions | join("/")): \(.address)"' | sort
+            echo '```'
+          } > plan-summary.md
+          cat plan-summary.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR" --body-file plan-summary.md --edit-last --create-if-none
+
+  apply:
+    name: Terraform apply
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - name: terraform init
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
+          -backend-config="key=${{ secrets.TFSTATE_KEY }}"
+      - run: terraform plan -no-color -out=tfplan
+      - run: terraform apply -no-color -auto-approve tfplan

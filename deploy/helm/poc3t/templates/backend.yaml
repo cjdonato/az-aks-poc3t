@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.backend.serviceAccountName }}
+  labels:
+    {{- include "poc3t.labels" . | nindent 4 }}
+  annotations:
+    # Links this service account to the backend managed identity (workload identity).
+    azure.workload.identity/client-id: {{ include "poc3t.required" (list .Values.workloadIdentity.clientId "workloadIdentity.clientId") | quote }}
+---
+# Reads the Postgres password from Key Vault and mirrors it into the
+# "backend-db" Kubernetes Secret while a backend pod mounts it.
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: backend-keyvault
+  labels:
+    {{- include "poc3t.labels" . | nindent 4 }}
+spec:
+  provider: azure
+  parameters:
+    clientID: {{ .Values.workloadIdentity.clientId | quote }}
+    keyvaultName: {{ include "poc3t.required" (list .Values.keyVault.name "keyVault.name") | quote }}
+    tenantId: {{ include "poc3t.required" (list .Values.keyVault.tenantId "keyVault.tenantId") | quote }}
+    objects: |
+      array:
+        - |
+          objectName: {{ .Values.keyVault.passwordSecretName }}
+          objectType: secret
+  secretObjects:
+    - secretName: backend-db
+      type: Opaque
+      data:
+        - objectName: {{ .Values.keyVault.passwordSecretName }}
+          key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    app.kubernetes.io/name: backend
+    {{- include "poc3t.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: backend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app.kubernetes.io/name: backend
+    {{- include "poc3t.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        azure.workload.identity/use: "true"
+        {{- include "poc3t.labels" . | nindent 8 }}
+      annotations:
+        # Restart pods when the SecretProviderClass changes.
+        checksum/keyvault: {{ printf "%s/%s" .Values.keyVault.name .Values.keyVault.passwordSecretName | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: {{ .Values.backend.serviceAccountName }}
+      securityContext:
+        runAsUser: 1000   # "node" user in the node:alpine image
+        runAsGroup: 1000
+      containers:
+        - name: backend
+          image: {{ include "poc3t.image" (list . "backend") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: APP_VERSION
+              value: {{ .Values.image.tag | quote }}
+            - name: PGHOST
+              value: {{ include "poc3t.required" (list .Values.postgres.host "postgres.host") | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: {{ include "poc3t.required" (list .Values.postgres.user "postgres.user") | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGSSLMODE
+              value: {{ .Values.postgres.sslMode | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-db
+                  key: password
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext:
+            {{- include "poc3t.containerSecurityContext" . | nindent 12 }}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: keyvault
+              mountPath: /mnt/secrets
+              readOnly: true
+      volumes:
+        - name: keyvault
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: backend-keyvault

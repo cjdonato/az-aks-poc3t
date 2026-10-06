@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - frontend/**
+      - backend/**
+      - deploy/**
+      - .github/workflows/ci.yml
+  # Reused by cd.yml as its test stage.
+  workflow_call:
+    inputs:
+      build-images:
+        description: Also build the container images (without pushing)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  helm:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - name: Lint and render with placeholder values
+        run: |
+          placeholders=(
+            --set image.registry=example.azurecr.io --set image.tag=ci
+            --set postgres.host=example.postgres.database.azure.com --set postgres.user=ci
+            --set keyVault.name=example --set keyVault.tenantId=ci
+            --set workloadIdentity.clientId=ci
+          )
+          helm lint deploy/helm/poc3t "${placeholders[@]}"
+          helm template poc3t deploy/helm/poc3t "${placeholders[@]}" > /dev/null
+          helm template poc3t deploy/helm/poc3t "${placeholders[@]}" --set gateway.enabled=true > /dev/null
+
+  images:
+    name: Build ${{ matrix.app }} image
+    # Plain pull_request runs have no inputs; build by default.
+    if: inputs.build-images != false
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.app }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}

@@ -1,0 +1,46 @@
+# Values marked "set by CD" are filled in from Terraform outputs by .github/workflows/cd.yml.
+
+image:
+  registry: ""          # set by CD: <acr>.azurecr.io
+  tag: latest           # set by CD: git SHA
+  pullPolicy: IfNotPresent
+
+frontend:
+  replicas: 2
+  # nginx forwards /api to this upstream (the backend Service below).
+  apiUpstream: http://backend:3000
+  service:
+    # LoadBalancer gives the frontend a public IP. With gateway.enabled the
+    # Gateway is the entry point instead, so the Service stays internal.
+    type: LoadBalancer
+    port: 80
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+backend:
+  replicas: 2
+  serviceAccountName: backend    # must match the Terraform federated credential subject
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { memory: 192Mi }
+
+postgres:
+  host: ""              # set by CD
+  user: ""              # set by CD
+  database: app
+  sslMode: require
+
+# Key Vault secret delivered by the Secrets Store CSI driver using workload identity.
+keyVault:
+  name: ""              # set by CD
+  tenantId: ""          # set by CD
+  passwordSecretName: postgres-password
+
+workloadIdentity:
+  clientId: ""          # set by CD: backend managed identity client ID
+
+# Optional AKS app-routing Gateway API (requires enable_gateway_api in Terraform).
+gateway:
+  enabled: false
+  className: approuting-istio

@@ -1,0 +1,7 @@
+{{- if .Values.gateway.enabled }}
+Get the public address:
+  kubectl -n {{ .Release.Namespace }} get gateway poc3t -o jsonpath='{.status.addresses[0].value}'
+{{- else }}
+Get the public address:
+  kubectl -n {{ .Release.Namespace }} get svc frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+{{- end }}
