@@ -8,7 +8,7 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
  ├─ poc3ttfstate<hash>            ├─ poc3t-vnet
  │   └─ tfstate/poc3t.tfstate     │   ├─ snet-aks       10.10.0.0/22
  └─ poc3t-github-ci               │   └─ snet-postgres  10.10.8.0/24 (delegated)
-                                  ├─ poc3t-aks          1 × Standard_B2s, CNI overlay,
+                                  ├─ poc3t-aks          1 × Standard_D2als_v6, CNI overlay,
                                   │                     Entra ID + Azure RBAC, workload identity,
                                   │                     Key Vault CSI driver
                                   ├─ poc3tacr<sfx>      Basic, AcrPull for the kubelet identity
@@ -28,7 +28,9 @@ Requires `az login` as a subscription Owner, `gh auth login`, and an existing Gi
 
 This creates the state storage, the CI identity with OIDC federated credentials
 (`main` branch, pull requests, `dev` environment), role assignments for CI and for you,
-and sets the repository variables the workflows read (`AZURE_*`, `TFSTATE_*`).
+sets the Actions secrets the workflows read (`AZURE_*`, `TFSTATE_*`), and hardens the
+public repo: read-only default workflow token, approval for fork PR workflows, and the
+`dev` environment restricted to the `main` branch.
 
 ## Running Terraform locally
 
@@ -46,12 +48,13 @@ terraform plan
 
 ## Sizing and cost
 
-Defaults are the smallest sizes that work, for a PoC:
+Region is **Sweden Central**: in France Central this subscription is blocked from every
+small VM size (`NotAvailableForSubscription`). Defaults are the smallest sizes that work:
 
 | Resource            | Default                        | Approx. cost (running 24/7) |
 | ------------------- | ------------------------------ | --------------------------- |
 | AKS control plane   | Free tier                      | $0                          |
-| AKS node            | 1 × Standard_B2s, 32 GB OS disk | ~$40/month                 |
+| AKS node            | 1 × Standard_D2als_v6, 32 GB OS disk | ~$65/month            |
 | Load balancer + IP  | Standard                       | ~$20/month                  |
 | PostgreSQL          | B_Standard_B1ms, 32 GB         | ~$17/month                  |
 | Container registry  | Basic                          | ~$5/month                   |

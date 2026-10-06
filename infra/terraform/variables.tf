@@ -7,7 +7,7 @@ variable "prefix" {
 variable "location" {
   description = "Azure region."
   type        = string
-  default     = "francecentral"
+  default     = "swedencentral"
 }
 
 variable "resource_group_name" {
@@ -25,9 +25,12 @@ variable "kubernetes_version" {
 }
 
 variable "node_vm_size" {
-  description = "Node VM size. Standard_B2s (2 vCPU / 4 GiB) is the smallest size AKS accepts."
+  description = <<-EOT
+    Node VM size. AKS needs at least 2 vCPU / 4 GiB. Standard_D2als_v6 is the cheapest
+    such size this subscription is allowed to use in Sweden Central (B-series is blocked).
+  EOT
   type        = string
-  default     = "Standard_B2s"
+  default     = "Standard_D2als_v6"
 }
 
 variable "node_count" {

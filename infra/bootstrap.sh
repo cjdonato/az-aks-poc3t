@@ -9,14 +9,14 @@
 #   - <prefix>-rg: empty resource group that Terraform fills
 #   - OIDC federated credentials so GitHub Actions can log in without secrets
 #   - role assignments for the CI identity and for you
-#   - GitHub repository variables and the "dev" environment
+#   - GitHub Actions secrets, the "dev" environment (main only) and repo hardening
 #
 # Safe to re-run.
 set -euo pipefail
 
 GITHUB_REPO="${1:?usage: $0 <github-owner>/<repo>}"
 PREFIX="${PREFIX:-poc3t}"
-LOCATION="${LOCATION:-francecentral}"
+LOCATION="${LOCATION:-swedencentral}"
 GH_ENVIRONMENT="${GH_ENVIRONMENT:-dev}"
 
 SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
@@ -120,16 +120,38 @@ for attempt in $(seq 1 20); do
   sleep 15
 done
 
-log "GitHub environment and repository variables"
-gh api -X PUT "repos/$GITHUB_REPO/environments/$GH_ENVIRONMENT" --silent
-set_var() { gh variable set "$1" --body "$2" -R "$GITHUB_REPO"; echo "    $1=$2"; }
-set_var AZURE_CLIENT_ID       "$CI_CLIENT_ID"
-set_var AZURE_TENANT_ID       "$TENANT_ID"
-set_var AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION_ID"
-set_var TFSTATE_RESOURCE_GROUP "$STATE_RG"
-set_var TFSTATE_STORAGE_ACCOUNT "$STATE_SA"
-set_var TFSTATE_CONTAINER     "$STATE_CONTAINER"
-set_var TFSTATE_KEY           "$STATE_KEY"
+log "GitHub repository hardening (the repo is public)"
+# Workflow GITHUB_TOKEN is read-only unless a workflow asks for more.
+gh api -X PUT "repos/$GITHUB_REPO/actions/permissions/workflow" --silent \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+echo "    default workflow token: read-only"
+# Workflows from forks wait for a maintainer's approval before running.
+gh api -X PUT "repos/$GITHUB_REPO/actions/permissions/fork-pr-contributor-approval" --silent \
+  -f approval_policy=all_external_contributors \
+  && echo "    fork PR workflows: need approval" \
+  || echo "    WARN: couldn't set fork PR approval policy; set it under Settings > Actions" >&2
+
+log "GitHub environment: $GH_ENVIRONMENT (deployable from main only)"
+gh api -X PUT "repos/$GITHUB_REPO/environments/$GH_ENVIRONMENT" --silent --input - <<'JSON'
+{ "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+JSON
+if ! gh api "repos/$GITHUB_REPO/environments/$GH_ENVIRONMENT/deployment-branch-policies" \
+     --jq '.branch_policies[].name' | grep -qx main; then
+  gh api -X POST "repos/$GITHUB_REPO/environments/$GH_ENVIRONMENT/deployment-branch-policies" \
+    --silent -f name=main -f type=branch
+fi
+
+log "GitHub Actions secrets"
+# These IDs aren't credentials (auth is OIDC), but secrets are masked in the public
+# workflow logs, which keeps subscription/tenant details out of them.
+set_secret() { gh secret set "$1" --body "$2" -R "$GITHUB_REPO"; echo "    $1"; }
+set_secret AZURE_CLIENT_ID         "$CI_CLIENT_ID"
+set_secret AZURE_TENANT_ID         "$TENANT_ID"
+set_secret AZURE_SUBSCRIPTION_ID   "$SUBSCRIPTION_ID"
+set_secret TFSTATE_RESOURCE_GROUP  "$STATE_RG"
+set_secret TFSTATE_STORAGE_ACCOUNT "$STATE_SA"
+set_secret TFSTATE_CONTAINER       "$STATE_CONTAINER"
+set_secret TFSTATE_KEY             "$STATE_KEY"
 
 log "Done. To run Terraform locally:"
 cat <<EOF
