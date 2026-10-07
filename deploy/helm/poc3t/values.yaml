@@ -27,18 +27,30 @@ backend:
 
 postgres:
   host: ""              # set by CD
-  user: ""              # set by CD
+  adminUser: ""         # set by CD; used only by the db-migrate job
+  appUser: app_user     # set by CD; least-privilege login the backend uses
   database: app
   sslMode: require
 
-# Key Vault secret delivered by the Secrets Store CSI driver using workload identity.
+# Key Vault secrets delivered by the Secrets Store CSI driver using workload identity.
 keyVault:
   name: ""              # set by CD
   tenantId: ""          # set by CD
-  passwordSecretName: postgres-password
+  adminPasswordSecretName: postgres-admin-password
+  appPasswordSecretName: postgres-app-password
 
+# Managed identity client IDs (set by CD). Each can read only its own secrets.
 workloadIdentity:
-  clientId: ""          # set by CD: backend managed identity client ID
+  backendClientId: ""   # app password
+  migrateClientId: ""   # admin + app passwords
+
+# Pre-install/pre-upgrade hook: applies migrations as the admin and ensures the
+# app role (password from Key Vault, DML-only grants).
+migrate:
+  serviceAccountName: db-migrate   # must match the Terraform federated credential subject
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { memory: 192Mi }
 
 # Optional AKS app-routing Gateway API (requires enable_gateway_api in Terraform).
 gateway:

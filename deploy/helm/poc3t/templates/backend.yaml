@@ -6,9 +6,9 @@ metadata:
     {{- include "poc3t.labels" . | nindent 4 }}
   annotations:
     # Links this service account to the backend managed identity (workload identity).
-    azure.workload.identity/client-id: {{ include "poc3t.required" (list .Values.workloadIdentity.clientId "workloadIdentity.clientId") | quote }}
+    azure.workload.identity/client-id: {{ include "poc3t.required" (list .Values.workloadIdentity.backendClientId "workloadIdentity.backendClientId") | quote }}
 ---
-# Reads the Postgres password from Key Vault and mirrors it into the
+# Reads the app role's Postgres password from Key Vault and mirrors it into the
 # "backend-db" Kubernetes Secret while a backend pod mounts it.
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
@@ -19,19 +19,19 @@ metadata:
 spec:
   provider: azure
   parameters:
-    clientID: {{ .Values.workloadIdentity.clientId | quote }}
+    clientID: {{ .Values.workloadIdentity.backendClientId | quote }}
     keyvaultName: {{ include "poc3t.required" (list .Values.keyVault.name "keyVault.name") | quote }}
     tenantId: {{ include "poc3t.required" (list .Values.keyVault.tenantId "keyVault.tenantId") | quote }}
     objects: |
       array:
         - |
-          objectName: {{ .Values.keyVault.passwordSecretName }}
+          objectName: {{ .Values.keyVault.appPasswordSecretName }}
           objectType: secret
   secretObjects:
     - secretName: backend-db
       type: Opaque
       data:
-        - objectName: {{ .Values.keyVault.passwordSecretName }}
+        - objectName: {{ .Values.keyVault.appPasswordSecretName }}
           key: password
 ---
 apiVersion: v1
@@ -70,7 +70,7 @@ spec:
         {{- include "poc3t.labels" . | nindent 8 }}
       annotations:
         # Restart pods when the SecretProviderClass changes.
-        checksum/keyvault: {{ printf "%s/%s" .Values.keyVault.name .Values.keyVault.passwordSecretName | sha256sum | trunc 16 }}
+        checksum/keyvault: {{ printf "%s/%s" .Values.keyVault.name .Values.keyVault.appPasswordSecretName | sha256sum | trunc 16 }}
     spec:
       serviceAccountName: {{ .Values.backend.serviceAccountName }}
       securityContext:
@@ -93,11 +93,14 @@ spec:
             - name: PGPORT
               value: "5432"
             - name: PGUSER
-              value: {{ include "poc3t.required" (list .Values.postgres.user "postgres.user") | quote }}
+              value: {{ include "poc3t.required" (list .Values.postgres.appUser "postgres.appUser") | quote }}
             - name: PGDATABASE
               value: {{ .Values.postgres.database | quote }}
             - name: PGSSLMODE
               value: {{ .Values.postgres.sslMode | quote }}
+            # Schema changes are done by the db-migrate hook; this role can't run DDL.
+            - name: RUN_MIGRATIONS
+              value: "false"
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

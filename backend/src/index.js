@@ -1,23 +1,14 @@
 import { createApp } from './app.js';
-import { createDb } from './db.js';
+import { createDb, withRetry } from './db.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const db = createDb();
 
-// Retry migrations so the API survives starting before the database is reachable.
-async function migrateWithRetry(attempts = 10, delayMs = 3000) {
-  for (let i = 1; ; i++) {
-    try {
-      return await db.migrate();
-    } catch (err) {
-      if (i >= attempts) throw err;
-      console.warn(`migration attempt ${i}/${attempts} failed: ${err.message}; retrying`);
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
+// Locally the API migrates its own schema. On AKS it connects as a role without
+// DDL rights, so RUN_MIGRATIONS=false and the db-migrate job does it instead.
+if (process.env.RUN_MIGRATIONS !== 'false') {
+  await withRetry(() => db.migrate(), { label: 'migration' });
 }
-
-await migrateWithRetry();
 
 const server = createApp({ db }).listen(port, () => {
   console.log(`backend listening on :${port}`);

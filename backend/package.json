@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "migrate": "node src/migrate.js",
     "test": "node --test"
   },
   "dependencies": {

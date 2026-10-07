@@ -128,13 +128,17 @@ jobs:
             --set image.registry="$TF_ACR_LOGIN_SERVER" \
             --set image.tag="$IMAGE_TAG" \
             --set postgres.host="$TF_POSTGRES_HOST" \
-            --set postgres.user="$TF_POSTGRES_USER" \
+            --set postgres.adminUser="$TF_POSTGRES_ADMIN_USER" \
+            --set postgres.appUser="$TF_POSTGRES_APP_USER" \
             --set postgres.database="$TF_POSTGRES_DATABASE" \
             --set keyVault.name="$TF_KEY_VAULT_NAME" \
             --set keyVault.tenantId="$TF_TENANT_ID" \
-            --set keyVault.passwordSecretName="$TF_POSTGRES_PASSWORD_SECRET_NAME" \
-            --set workloadIdentity.clientId="$TF_BACKEND_IDENTITY_CLIENT_ID" \
+            --set keyVault.adminPasswordSecretName="$TF_POSTGRES_ADMIN_PASSWORD_SECRET_NAME" \
+            --set keyVault.appPasswordSecretName="$TF_POSTGRES_APP_PASSWORD_SECRET_NAME" \
+            --set workloadIdentity.backendClientId="$TF_BACKEND_IDENTITY_CLIENT_ID" \
+            --set workloadIdentity.migrateClientId="$TF_MIGRATE_IDENTITY_CLIENT_ID" \
             --set backend.serviceAccountName="$TF_BACKEND_SERVICE_ACCOUNT" \
+            --set migrate.serviceAccountName="$TF_MIGRATE_SERVICE_ACCOUNT" \
             --set gateway.enabled="$TF_GATEWAY_API_ENABLED" \
             --rollback-on-failure --timeout 10m
       - name: Show pods on failure
@@ -142,6 +146,7 @@ jobs:
         run: |
           kubectl -n "$TF_APP_NAMESPACE" get pods -o wide || true
           kubectl -n "$TF_APP_NAMESPACE" describe pods | tail -60 || true
+          kubectl -n "$TF_APP_NAMESPACE" logs job/db-migrate --tail=50 || true
           kubectl -n "$TF_APP_NAMESPACE" logs deploy/backend --tail=50 || true
 
       # --- Smoke test through the public endpoint -------------------------------

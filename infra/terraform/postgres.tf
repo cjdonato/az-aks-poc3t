@@ -1,4 +1,13 @@
-resource "random_password" "postgres" {
+resource "random_password" "postgres_admin" {
+  length           = 32
+  special          = true
+  override_special = "-_.~"
+}
+
+# Password for the least-privilege application role. The role itself is created
+# inside the database by the db-migrate Helm hook (the server is private, so
+# Terraform running in GitHub Actions can't reach it).
+resource "random_password" "postgres_app" {
   length           = 32
   special          = true
   override_special = "-_.~"
@@ -18,7 +27,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   public_network_access_enabled = false
 
   administrator_login    = "pgadmin"
-  administrator_password = random_password.postgres.result
+  administrator_password = random_password.postgres_admin.result
 
   authentication {
     password_auth_enabled         = true

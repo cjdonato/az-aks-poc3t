@@ -94,3 +94,15 @@ variable "backend_service_account" {
   type        = string
   default     = "backend"
 }
+
+variable "migrate_service_account" {
+  description = "Kubernetes service account used by the db-migrate job (workload identity)."
+  type        = string
+  default     = "db-migrate"
+}
+
+variable "postgres_app_user" {
+  description = "Least-privilege login the backend uses (DML only, no DDL)."
+  type        = string
+  default     = "app_user"
+}

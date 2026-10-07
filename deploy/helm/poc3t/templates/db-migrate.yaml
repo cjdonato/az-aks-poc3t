@@ -1,0 +1,108 @@
+{{- /*
+Database setup hook. Runs before every install/upgrade, before the new backend pods:
+applies migrations as the server admin, then creates/updates the least-privilege
+app role. The service account and SecretProviderClass are hooks too, with a lower
+weight, so they exist before the Job on a first install.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.migrate.serviceAccountName }}
+  labels:
+    {{- include "poc3t.labels" . | nindent 4 }}
+  annotations:
+    azure.workload.identity/client-id: {{ include "poc3t.required" (list .Values.workloadIdentity.migrateClientId "workloadIdentity.migrateClientId") | quote }}
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: db-migrate-keyvault
+  labels:
+    {{- include "poc3t.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  provider: azure
+  parameters:
+    clientID: {{ .Values.workloadIdentity.migrateClientId | quote }}
+    keyvaultName: {{ include "poc3t.required" (list .Values.keyVault.name "keyVault.name") | quote }}
+    tenantId: {{ include "poc3t.required" (list .Values.keyVault.tenantId "keyVault.tenantId") | quote }}
+    # Mounted as files only; no Kubernetes Secret holds the admin password.
+    objects: |
+      array:
+        - |
+          objectName: {{ .Values.keyVault.adminPasswordSecretName }}
+          objectType: secret
+        - |
+          objectName: {{ .Values.keyVault.appPasswordSecretName }}
+          objectType: secret
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  labels:
+    app.kubernetes.io/name: db-migrate
+    {{- include "poc3t.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # Keep a failed job around for `kubectl logs job/db-migrate`.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        {{- include "poc3t.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.migrate.serviceAccountName }}
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000   # "node" user in the node:alpine image
+        runAsGroup: 1000
+      containers:
+        - name: migrate
+          image: {{ include "poc3t.image" (list . "backend") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "src/migrate.js"]
+          env:
+            - name: PGHOST
+              value: {{ include "poc3t.required" (list .Values.postgres.host "postgres.host") | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: {{ include "poc3t.required" (list .Values.postgres.adminUser "postgres.adminUser") | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGSSLMODE
+              value: {{ .Values.postgres.sslMode | quote }}
+            - name: PGPASSWORD_FILE
+              value: /mnt/secrets/{{ .Values.keyVault.adminPasswordSecretName }}
+            - name: APP_DB_USER
+              value: {{ include "poc3t.required" (list .Values.postgres.appUser "postgres.appUser") | quote }}
+            - name: APP_DB_PASSWORD_FILE
+              value: /mnt/secrets/{{ .Values.keyVault.appPasswordSecretName }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          securityContext:
+            {{- include "poc3t.containerSecurityContext" . | nindent 12 }}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: keyvault
+              mountPath: /mnt/secrets
+              readOnly: true
+      volumes:
+        - name: keyvault
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: db-migrate-keyvault

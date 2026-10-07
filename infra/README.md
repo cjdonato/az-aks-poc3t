@@ -13,9 +13,15 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
                                   │                     Key Vault CSI driver
                                   ├─ poc3tacr<sfx>      Basic, AcrPull for the kubelet identity
                                   ├─ poc3t-pg-<sfx>     PostgreSQL 17, B1ms, private access only
-                                  ├─ poc3t-kv-<sfx>     RBAC mode, holds postgres-password
-                                  └─ poc3t-backend-id   federated with SA poc3t/backend,
-                                                        Key Vault Secrets User
+                                  ├─ poc3t-kv-<sfx>     RBAC mode: postgres-admin-password,
+                                  │                     postgres-app-password
+                                  ├─ poc3t-backend-id   SA poc3t/backend; reads app password only
+                                  └─ poc3t-migrate-id   SA poc3t/db-migrate; reads both passwords
+
+Database access: the backend connects as `app_user` (SELECT/INSERT/UPDATE/DELETE only).
+The `db-migrate` Helm hook runs before each deploy as `pgadmin`: it applies migrations and
+creates the role or resets its password from Key Vault. The server is private, so this
+runs inside the cluster rather than from GitHub Actions.
 ```
 
 ## One-time bootstrap

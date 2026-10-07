@@ -36,20 +36,34 @@ output "postgres_host" {
   sensitive = true
 }
 
-output "postgres_user" {
+output "postgres_admin_user" {
   value = azurerm_postgresql_flexible_server.main.administrator_login
+}
+
+output "postgres_app_user" {
+  value = var.postgres_app_user
 }
 
 output "postgres_database" {
   value = azurerm_postgresql_flexible_server_database.app.name
 }
 
-output "postgres_password_secret_name" {
-  value = azurerm_key_vault_secret.postgres_password.name
+output "postgres_admin_password_secret_name" {
+  value = azurerm_key_vault_secret.postgres_admin_password.name
+}
+
+output "postgres_app_password_secret_name" {
+  value = azurerm_key_vault_secret.postgres_app_password.name
 }
 
 output "backend_identity_client_id" {
-  value = azurerm_user_assigned_identity.backend.client_id
+  value = azurerm_user_assigned_identity.workload["backend"].client_id
+  # Hidden from public workflow logs (cd.yml still reads it via output -json).
+  sensitive = true
+}
+
+output "migrate_identity_client_id" {
+  value = azurerm_user_assigned_identity.workload["migrate"].client_id
   # Hidden from public workflow logs (cd.yml still reads it via output -json).
   sensitive = true
 }
@@ -60,6 +74,10 @@ output "app_namespace" {
 
 output "backend_service_account" {
   value = var.backend_service_account
+}
+
+output "migrate_service_account" {
+  value = var.migrate_service_account
 }
 
 output "gateway_api_enabled" {

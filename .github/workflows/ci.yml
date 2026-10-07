@@ -63,9 +63,9 @@ jobs:
         run: |
           placeholders=(
             --set image.registry=example.azurecr.io --set image.tag=ci
-            --set postgres.host=example.postgres.database.azure.com --set postgres.user=ci
+            --set postgres.host=example.postgres.database.azure.com --set postgres.adminUser=ci
             --set keyVault.name=example --set keyVault.tenantId=ci
-            --set workloadIdentity.clientId=ci
+            --set workloadIdentity.backendClientId=ci --set workloadIdentity.migrateClientId=ci
           )
           helm lint deploy/helm/poc3t "${placeholders[@]}"
           helm template poc3t deploy/helm/poc3t "${placeholders[@]}" > /dev/null
