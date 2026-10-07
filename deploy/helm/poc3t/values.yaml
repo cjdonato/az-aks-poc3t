@@ -14,6 +14,9 @@ frontend:
     # Gateway is the entry point instead, so the Service stays internal.
     type: LoadBalancer
     port: 80
+    # Azure DNS label for the public IP: <dnsLabel>.<region>.cloudapp.azure.com
+    # (set by CD; Front Door uses it as the origin hostname).
+    dnsLabel: ""
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 64Mi }
@@ -51,6 +54,13 @@ migrate:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { memory: 192Mi }
+
+# Optional Azure Front Door in front of the frontend LoadBalancer (Terraform
+# enable_front_door). The Service then only admits the AzureFrontDoor.Backend
+# service tag, and nginx requires this profile's X-Azure-FDID header.
+frontDoor:
+  enabled: false
+  id: ""                # set by CD: Front Door profile resource GUID
 
 # Optional AKS app-routing Gateway API (requires enable_gateway_api in Terraform).
 gateway:

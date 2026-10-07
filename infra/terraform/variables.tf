@@ -55,6 +55,15 @@ variable "enable_gateway_api" {
   default     = false
 }
 
+variable "enable_front_door" {
+  description = <<-EOT
+    Put Azure Front Door (Standard, ~$35/month base fee) in front of the frontend for an
+    HTTPS *.azurefd.net URL. Requires the LoadBalancer frontend (enable_gateway_api = false).
+  EOT
+  type        = bool
+  default     = true
+}
+
 # --- PostgreSQL -----------------------------------------------------------------
 
 variable "postgres_version" {

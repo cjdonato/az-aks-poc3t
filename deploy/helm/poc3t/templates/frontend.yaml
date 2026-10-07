@@ -1,3 +1,6 @@
+{{- if and .Values.frontDoor.enabled .Values.gateway.enabled }}
+{{- fail "frontDoor.enabled targets the frontend LoadBalancer; it can't be combined with gateway.enabled" }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -5,6 +8,16 @@ metadata:
   labels:
     app.kubernetes.io/name: frontend
     {{- include "poc3t.labels" . | nindent 4 }}
+  {{- if and (not .Values.gateway.enabled) (or .Values.frontend.service.dnsLabel .Values.frontDoor.enabled) }}
+  annotations:
+    {{- with .Values.frontend.service.dnsLabel }}
+    service.beta.kubernetes.io/azure-dns-label-name: {{ . | quote }}
+    {{- end }}
+    {{- if .Values.frontDoor.enabled }}
+    # Only Front Door may reach the public IP (Azure NSG rule on the service tag).
+    service.beta.kubernetes.io/azure-allowed-service-tags: AzureFrontDoor.Backend
+    {{- end }}
+  {{- end }}
 spec:
   type: {{ if .Values.gateway.enabled }}ClusterIP{{ else }}{{ .Values.frontend.service.type }}{{ end }}
   selector:
@@ -45,6 +58,8 @@ spec:
           env:
             - name: API_UPSTREAM
               value: {{ .Values.frontend.apiUpstream | quote }}
+            - name: FRONT_DOOR_ID
+              value: {{ if .Values.frontDoor.enabled }}{{ include "poc3t.required" (list .Values.frontDoor.id "frontDoor.id") | quote }}{{ else }}""{{ end }}
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10

@@ -65,7 +65,7 @@ cd backend && npm test
 | -------- | ------- | ------------ |
 | `CI` | PRs touching app or chart | Backend tests, frontend build, Helm lint, image builds (no push) |
 | `Infra` | PR / push to `main` touching `infra/terraform`, manual | PR: `terraform plan`, summary comment (addresses only). `main`: plan + apply |
-| `CD` | push to `main` touching app or chart, after a successful `Infra` run, manual | Tests, then builds and pushes images tagged with the commit SHA to ACR, `helm upgrade --install`, smoke test via the public IP |
+| `CD` | push to `main` touching app or chart, after a successful `Infra` run, manual | Tests, then builds and pushes images tagged with the commit SHA to ACR, `helm upgrade --install`, smoke test through Front Door (or the public IP when it's disabled) |
 | `Destroy` | manual, type `destroy` to confirm | `terraform destroy` of everything in `poc3t-rg` |
 
 All Azure access uses GitHub OIDC with the `poc3t-github-ci` managed identity; there are

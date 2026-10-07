@@ -90,3 +90,24 @@ output "name_suffix" {
   value     = local.suffix
   sensitive = true
 }
+
+output "front_door_enabled" {
+  value = var.enable_front_door
+}
+
+# Public app URL when Front Door is enabled.
+output "front_door_endpoint_host" {
+  value = var.enable_front_door ? azurerm_cdn_frontdoor_endpoint.main[0].host_name : ""
+}
+
+# Value Front Door sends in X-Azure-FDID; nginx only accepts requests carrying it.
+output "front_door_id" {
+  value     = var.enable_front_door ? azurerm_cdn_frontdoor_profile.main[0].resource_guid : ""
+  sensitive = true
+}
+
+# Azure DNS label for the frontend public IP (Front Door's origin hostname).
+output "frontend_dns_label" {
+  value     = local.frontend_dns_label
+  sensitive = true
+}

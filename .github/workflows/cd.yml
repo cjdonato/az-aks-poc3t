@@ -140,6 +140,9 @@ jobs:
             --set backend.serviceAccountName="$TF_BACKEND_SERVICE_ACCOUNT" \
             --set migrate.serviceAccountName="$TF_MIGRATE_SERVICE_ACCOUNT" \
             --set gateway.enabled="$TF_GATEWAY_API_ENABLED" \
+            --set frontend.service.dnsLabel="$TF_FRONTEND_DNS_LABEL" \
+            --set frontDoor.enabled="$TF_FRONT_DOOR_ENABLED" \
+            --set frontDoor.id="$TF_FRONT_DOOR_ID" \
             --rollback-on-failure --timeout 10m
       - name: Show pods on failure
         if: failure() && steps.tf.outputs.provisioned == 'true'
@@ -161,11 +164,33 @@ jobs:
           for i in $(seq 1 30); do ip="$(addr)"; [ -n "$ip" ] && break; sleep 10; done
           [ -n "$ip" ] || { echo "No public address assigned"; exit 1; }
 
-          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "http://$ip/" -o /dev/null
-          info="$(curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "http://$ip/api/info")"
-          curl -fsS "http://$ip/api/items" > /dev/null
+          if [ "$TF_FRONT_DOOR_ENABLED" = "true" ]; then
+            url="https://$TF_FRONT_DOOR_ENDPOINT_HOST"
+            # The origin only admits Front Door; a direct request must not succeed.
+            if curl -fsS --max-time 10 "http://$ip/" -o /dev/null 2>/dev/null; then
+              echo "Frontend IP is reachable directly; expected only Front Door access"; exit 1
+            fi
+            # A new endpoint can take 10-20 minutes to propagate, so wait for it.
+            for i in $(seq 1 100); do
+              curl -fsS --max-time 15 "$url/healthz" -o /dev/null 2>/dev/null && break
+              [ "$i" = 100 ] && { echo "Front Door endpoint not serving after 25 minutes"; exit 1; }
+              sleep 15
+            done
+            # Front Door must redirect plain HTTP to HTTPS.
+            redirect="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://$TF_FRONT_DOOR_ENDPOINT_HOST/")"
+            case "$redirect" in
+              30[1278]\ https://*) ;;
+              *) echo "Expected an HTTPS redirect, got: $redirect"; exit 1 ;;
+            esac
+          else
+            url="http://$ip"
+          fi
+
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "$url/" -o /dev/null
+          info="$(curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "$url/api/info")"
+          curl -fsS "$url/api/items" > /dev/null
           echo "$info" | jq -e --arg v "$IMAGE_TAG" '.version == $v' > /dev/null \
             || { echo "Unexpected version: $info"; exit 1; }
 
           echo "### Deployed \`${IMAGE_TAG::7}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "App: http://$ip/" >> "$GITHUB_STEP_SUMMARY"
+          echo "App: $url/" >> "$GITHUB_STEP_SUMMARY"

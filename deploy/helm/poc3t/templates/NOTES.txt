@@ -1,4 +1,7 @@
-{{- if .Values.gateway.enabled }}
+{{- if .Values.frontDoor.enabled }}
+The app is served through Azure Front Door (see the CD run summary for the
+https://*.azurefd.net URL). Direct access to the frontend IP is blocked.
+{{- else if .Values.gateway.enabled }}
 Get the public address:
   kubectl -n {{ .Release.Namespace }} get gateway poc3t -o jsonpath='{.status.addresses[0].value}'
 {{- else }}

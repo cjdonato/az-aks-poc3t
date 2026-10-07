@@ -16,7 +16,9 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
                                   ├─ poc3t-kv-<sfx>     RBAC mode: postgres-admin-password,
                                   │                     postgres-app-password
                                   ├─ poc3t-backend-id   SA poc3t/backend; reads app password only
-                                  └─ poc3t-migrate-id   SA poc3t/db-migrate; reads both passwords
+                                  ├─ poc3t-migrate-id   SA poc3t/db-migrate; reads both passwords
+                                  └─ poc3t-afd          Front Door Standard: https://<endpoint>.azurefd.net
+                                                        -> frontend LB (<label>.<region>.cloudapp.azure.com)
 
 Database access: the backend connects as `app_user` (SELECT/INSERT/UPDATE/DELETE only).
 The `db-migrate` Helm hook runs before each deploy as `pgadmin`: it applies migrations and
@@ -62,6 +64,7 @@ small VM size (`NotAvailableForSubscription`). Defaults are the smallest sizes t
 | AKS control plane   | Free tier                      | $0                          |
 | AKS node            | 1 × Standard_D2als_v6, 32 GB OS disk | ~$65/month            |
 | Load balancer + IP  | Standard                       | ~$20/month                  |
+| Front Door          | Standard (`enable_front_door`) | ~$35/month + traffic        |
 | PostgreSQL          | B_Standard_B1ms, 32 GB         | ~$17/month                  |
 | Container registry  | Basic                          | ~$5/month                   |
 | Key Vault, VNet, DNS | Standard                      | < $1/month                  |
@@ -70,4 +73,14 @@ Destroying the stack between demos stops almost all of it; the bootstrap resourc
 (state storage + identity) cost cents.
 
 Useful variables (`terraform.tfvars` or `-var`): `node_vm_size`, `node_count`,
-`enable_gateway_api` (needs bigger or more nodes), `postgres_sku`.
+`enable_gateway_api` (needs bigger or more nodes), `enable_front_door`, `postgres_sku`.
+
+## HTTPS via Azure Front Door
+
+With `enable_front_door = true` (default) the app is served at
+`https://<endpoint>.z01.azurefd.net` with a Microsoft-managed certificate; no custom domain
+needed. HTTP is redirected to HTTPS. TLS ends at Front Door, which talks HTTP to the
+frontend LoadBalancer through its Azure DNS label. The origin is locked down two ways:
+the Service only admits the `AzureFrontDoor.Backend` service tag (NSG rule), and nginx
+rejects requests without this profile's `X-Azure-FDID` header. A new endpoint can take
+10–20 minutes to start serving; the CD smoke test waits for it.

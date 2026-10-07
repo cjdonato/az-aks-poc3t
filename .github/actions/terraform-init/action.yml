@@ -47,6 +47,7 @@ runs:
       run: |
         terraform output -json | jq -r '
           [.name_suffix, .acr_name, .acr_login_server, .key_vault_name,
-           .postgres_host, .backend_identity_client_id, .migrate_identity_client_id][]
+           .postgres_host, .backend_identity_client_id, .migrate_identity_client_id,
+           .front_door_id, .frontend_dns_label][]
           | .value // empty' \
           | while read -r value; do echo "::add-mask::$value"; done
