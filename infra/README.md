@@ -84,3 +84,77 @@ frontend LoadBalancer through its Azure DNS label. The origin is locked down two
 the Service only admits the `AzureFrontDoor.Backend` service tag (NSG rule), and nginx
 rejects requests without this profile's `X-Azure-FDID` header. A new endpoint can take
 10–20 minutes to start serving; the CD smoke test waits for it.
+
+## Cleanup
+
+Removing everything takes three steps, in this order. Step 2 deletes the Terraform state,
+so run it only after step 1 has finished.
+
+### 1. Destroy the environment
+
+Run the **Destroy** workflow from the Actions tab and type `destroy` to confirm (or run
+`terraform destroy` locally). This removes everything Terraform created in `poc3t-rg`,
+including AKS and its node resource group `poc3t-aks-nodes-rg`, PostgreSQL, ACR, Key Vault
+and Front Door. Costs stop here; what remains below costs cents per month.
+
+### 2. Remove the bootstrap resources
+
+Run these as the subscription Owner who ran `bootstrap.sh` (works in bash and zsh):
+
+```sh
+SUB_ID="$(az account show --query id -o tsv)"
+APP_RG_ID="/subscriptions/$SUB_ID/resourceGroups/poc3t-rg"
+STATE_SA_ID="$(az storage account list -g poc3t-tfstate-rg --query '[0].id' -o tsv)"
+
+# Role assignments bootstrap.sh created for the CI identity and for you. The filter keeps
+# only assignments made exactly at these two scopes, never inherited subscription ones.
+for scope in "$APP_RG_ID" "$STATE_SA_ID"; do
+  az role assignment list --scope "$scope" --query "[?scope=='$scope'].id" -o tsv |
+    while read -r id; do az role assignment delete --ids "$id"; done
+done
+
+# The empty app resource group, then the state storage account and the CI managed
+# identity (its GitHub OIDC federated credentials are deleted with it).
+az group delete -n poc3t-rg --yes
+az group delete -n poc3t-tfstate-rg --yes
+```
+
+Deleting the role assignments first matters. If the identity goes first, its assignments
+stay behind as orphaned "Identity not found" entries.
+
+### 3. Remove the GitHub configuration
+
+```sh
+REPO=<owner>/<repo>
+for s in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+         TFSTATE_RESOURCE_GROUP TFSTATE_STORAGE_ACCOUNT TFSTATE_CONTAINER TFSTATE_KEY; do
+  gh secret delete "$s" -R "$REPO"
+done
+gh api -X DELETE "repos/$REPO/environments/dev"
+```
+
+Or delete the repository (`gh repo delete <owner>/<repo>`, which needs the `delete_repo`
+scope: `gh auth refresh -s delete_repo`). The Actions settings `bootstrap.sh` changed (read-only
+workflow token, fork approval) are harmless to keep.
+
+### Optional leftovers (no cost)
+
+- **Soft-deleted Key Vault**: kept for 7 days, then purged automatically. To purge now:
+  `az keyvault list-deleted --query "[?starts_with(name, 'poc3t-kv-')].name" -o tsv`, then
+  `az keyvault purge -n <name>`.
+- **Network Watcher**: Azure creates `NetworkWatcher_swedencentral` in `NetworkWatcherRG`
+  when the first VNet appears in the region. Other projects may use the same resource group,
+  so only disable this region's watcher:
+  `az network watcher configure -g NetworkWatcherRG -l swedencentral --enabled false`.
+- **Resource provider registrations** (`Microsoft.ContainerService`, `Microsoft.Cdn`, ...):
+  free, and other workloads may rely on them; leave them registered.
+- **Local files**: `rm -rf infra/terraform/.terraform`.
+
+### Check that nothing is left
+
+```sh
+az group list --query "[?starts_with(name, 'poc3t')].name" -o tsv     # expect no output
+az role assignment list --all --query "[?contains(scope, 'poc3t')]" -o table
+```
+
+To start again later, run `./infra/bootstrap.sh <owner>/<repo>` and then the Infra workflow.
