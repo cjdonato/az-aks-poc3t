@@ -8,6 +8,44 @@ A proof-of-concept three-tier web app, built and deployed to AKS by GitHub Actio
 | Application  | Node.js / Express REST API      | AKS                                      |
 | Data         | PostgreSQL                      | Azure Database for PostgreSQL (Flexible) |
 
+## Architecture
+
+Serving a request (solid: traffic, dotted: images and secrets):
+
+```mermaid
+flowchart LR
+  user([Browser]) -- HTTPS --> afd["Azure Front Door<br/>azurefd.net, TLS"]
+  afd -- "HTTP + X-Azure-FDID" --> lb["Load balancer<br/>Front Door only"]
+  subgraph vnet["VNet (private)"]
+    subgraph aks["AKS, namespace poc3t"]
+      fe["frontend<br/>nginx"] -- /api --> be["backend<br/>Express"]
+      job["db-migrate job<br/>pre-deploy hook"]
+    end
+    pg[("PostgreSQL<br/>private subnet")]
+  end
+  lb --> fe
+  be -- "SQL as app_user" --> pg
+  job -- "migrations + grants as pgadmin" --> pg
+  acr["Container Registry"] -. image pull .-> aks
+  kv["Key Vault"] -. "passwords via CSI" .-> aks
+```
+
+Shipping a change:
+
+```mermaid
+flowchart LR
+  push([git push]) --> ci["CI<br/>PR checks"]
+  push --> infra["Infra<br/>terraform plan / apply"]
+  push --> cd["CD<br/>build, push, helm"]
+  infra -- on success --> cd
+  infra -. OIDC token .-> entra["Entra ID<br/>poc3t-github-ci"]
+  cd -. OIDC token .-> entra
+  entra --> state[("Terraform state")]
+  entra --> rg["poc3t-rg resources"]
+  entra --> acr["Container Registry"]
+  entra --> aks["AKS"]
+```
+
 ## Repository layout
 
 ```
