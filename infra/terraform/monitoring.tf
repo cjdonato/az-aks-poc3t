@@ -79,11 +79,12 @@ resource "azurerm_monitor_data_collection_rule_association" "container_insights"
 locals {
   diagnostic_settings = merge(
     {
-      # Entra ID sign-ins (guard) and write operations by admins on the cluster.
-      # Full kube-audit and kube-apiserver logs are left out: they are very noisy.
+      # Entra ID sign-ins and authorization decisions (guard). All audit categories
+      # are left out: even kube-audit-admin is ~0.7 GB/day on an idle cluster, almost
+      # all of it AKS's own lease renewals, which would blow the daily cap.
       aks = {
         target           = azurerm_kubernetes_cluster.main.id
-        categories       = ["kube-audit-admin", "guard"]
+        categories       = ["guard"]
         category_groups  = []
         destination_type = "Dedicated" # AKSAudit*/AKSControlPlane tables
       }

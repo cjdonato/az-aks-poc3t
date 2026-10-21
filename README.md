@@ -110,7 +110,7 @@ Everything reports to one Log Analytics workspace, `poc3t-law` (see
 | Edge requests and failed origin probes | Front Door diagnostic logs | Log Analytics, `AzureDiagnostics` |
 | Slow SQL (over 500 ms) and server errors | PostgreSQL diagnostic logs | Log Analytics, `AzureDiagnostics` |
 | Secret reads and changes | Key Vault audit logs | Log Analytics, `AzureDiagnostics` |
-| Cluster admin writes, Entra sign-ins to the API server | AKS control-plane logs | Log Analytics, `AKSAuditAdmin`, `AKSControlPlane` |
+| Entra sign-ins and authorization decisions on the API server | AKS control-plane logs (`guard`; audit logs are off, ~0.7 GB/day) | Log Analytics, `AKSControlPlane` |
 
 The backend preloads [backend/src/telemetry.js](backend/src/telemetry.js)
 (`node --import`), which starts the Microsoft OpenTelemetry Distro only when
@@ -138,6 +138,10 @@ AzureDiagnostics
 | where Category == "PostgreSQLLogs" and Message has "duration:"
 | project TimeGenerated, Message
 ```
+
+`ContainerLogV2` is a Basic-plan table: query it on its own (`ContainerLogV2 | where
+PodNamespace == "poc3t"`), not through `union *` or joins with other tables. Outside the
+portal it needs the `/search` API rather than `/query`.
 
 To keep costs predictable, the workspace has a 0.5 GB/day ingestion cap
 (`log_analytics_daily_quota_gb`) and 30-day retention.
