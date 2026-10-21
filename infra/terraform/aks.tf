@@ -83,6 +83,10 @@ resource "azurerm_kubernetes_cluster" "main" {
     msi_auth_for_monitoring_enabled = true
   }
 
+  # Managed Prometheus agent (ama-metrics). Where it sends is set by the data
+  # collection rule in monitoring.tf. No extra pod annotations/labels are exported.
+  monitor_metrics {}
+
   tags = local.tags
 
   depends_on = [azurerm_role_assignment.aks_network]

@@ -34,9 +34,13 @@ variable "node_vm_size" {
 }
 
 variable "node_count" {
-  description = "Number of nodes in the single system node pool."
+  description = <<-EOT
+    Number of nodes in the single system node pool. Two: one D2als_v6 can't fit the
+    system pods, both monitoring agents (Container Insights + managed Prometheus) and
+    the app.
+  EOT
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "node_os_disk_size_gb" {

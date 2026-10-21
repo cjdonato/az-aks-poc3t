@@ -8,7 +8,7 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
  ├─ poc3ttfstate<hash>            ├─ poc3t-vnet
  │   └─ tfstate/poc3t.tfstate     │   ├─ snet-aks       10.10.0.0/22
  └─ poc3t-github-ci               │   └─ snet-postgres  10.10.8.0/24 (delegated)
-                                  ├─ poc3t-aks          1 × Standard_D2als_v6, CNI overlay,
+                                  ├─ poc3t-aks          2 × Standard_D2als_v6, CNI overlay,
                                   │                     Entra ID + Azure RBAC, workload identity,
                                   │                     Key Vault CSI driver
                                   ├─ poc3tacr<sfx>      Basic, AcrPull for the kubelet identity
@@ -22,6 +22,8 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
                                   ├─ poc3t-law          Log Analytics: Container Insights + diagnostic
                                   │                     logs (AFD, Postgres, Key Vault, AKS), 0.5 GB/day cap
                                   ├─ MSCI-poc3t-aks     Container Insights data collection rule
+                                  ├─ poc3t-amw          Azure Monitor workspace (managed Prometheus),
+                                  │                     + MSProm-* endpoint/rule, recording rule groups
                                   └─ poc3t-appi         Application Insights (in poc3t-law), Entra auth
                                                         only; poc3t-backend-id may publish
 
@@ -40,8 +42,9 @@ Requires `az login` as a subscription Owner, `gh auth login`, and an existing Gi
 ```
 
 It's safe to re-run, for example when a new feature needs another resource provider
-(monitoring added `Microsoft.Insights`, `Microsoft.AlertsManagement` and
-`Microsoft.OperationsManagement`). The CI identity can't register providers itself.
+(monitoring added `Microsoft.Insights`, `Microsoft.AlertsManagement`,
+`Microsoft.OperationsManagement` and `Microsoft.Monitor`). The CI identity can't register
+providers itself.
 
 This creates the state storage, the CI identity with OIDC federated credentials
 (`main` branch, pull requests, `dev` environment), role assignments for CI and for you,
@@ -71,13 +74,15 @@ small VM size (`NotAvailableForSubscription`). Defaults are the smallest sizes t
 | Resource            | Default                        | Approx. cost (running 24/7) |
 | ------------------- | ------------------------------ | --------------------------- |
 | AKS control plane   | Free tier                      | $0                          |
-| AKS node            | 1 × Standard_D2als_v6, 32 GB OS disk | ~$65/month            |
+| AKS nodes           | 2 × Standard_D2als_v6, 32 GB OS disk | ~$130/month           |
 | Load balancer + IP  | Standard                       | ~$20/month                  |
 | Front Door          | Standard (`enable_front_door`) | ~$35/month + traffic        |
 | PostgreSQL          | B_Standard_B1ms, 32 GB         | ~$17/month                  |
 | Container registry  | Basic                          | ~$5/month                   |
 | Key Vault, VNet, DNS | Standard                      | < $1/month                  |
 | Log Analytics + App Insights | Pay per GB ingested, 0.5 GB/day cap | ~$0–5/month at PoC traffic; at most ~$30/month if the cap is hit daily |
+| Managed Prometheus  | Pay per metric sample ingested and queried | a few $/month for two nodes |
+| Grafana dashboards  | Azure portal (Dashboards with Grafana) | $0                          |
 
 Destroying the stack between demos stops almost all of it; the bootstrap resources
 (state storage + identity) cost cents.
@@ -88,9 +93,13 @@ Useful variables (`terraform.tfvars` or `-var`): `node_vm_size`, `node_count`,
 
 Monitoring costs are mostly log ingestion. The first 5 GB per month is free per billing
 account, container logs go to a Basic-plan table (a fraction of the Analytics price), and
-Container Insights collects every 5 minutes instead of every minute. Once the daily cap is
-reached, the workspace drops new data until midnight UTC. The Container Insights agent
-(`ama-logs` pods in `kube-system`) also takes roughly 0.2 vCPU and 0.5 GiB of the node.
+Container Insights only collects logs, events and pod inventory every 5 minutes;
+CPU/memory come from managed Prometheus, which is priced per sample rather than per GB.
+Once the daily cap is reached, the workspace drops new data until midnight UTC.
+
+The two monitoring agents need room: `ama-logs` (Container Insights) takes roughly
+0.2 vCPU and 0.5 GiB, `ama-metrics` (Prometheus) roughly 0.25 vCPU and 0.8 GiB. With the
+system pods that doesn't fit next to the app on one D2als_v6, hence two nodes.
 
 ## HTTPS via Azure Front Door
 
@@ -173,7 +182,9 @@ workflow token, fork approval) are harmless to keep.
 ### Check that nothing is left
 
 ```sh
-az group list --query "[?starts_with(name, 'poc3t')].name" -o tsv     # expect no output
+# contains(), not starts_with(): the Prometheus workspace's managed resource group is
+# named MA_poc3t-amw_<region>_managed (deleted together with the workspace).
+az group list --query "[?contains(name, 'poc3t')].name" -o tsv        # expect no output
 az role assignment list --all --query "[?contains(scope, 'poc3t')]" -o table
 ```
 

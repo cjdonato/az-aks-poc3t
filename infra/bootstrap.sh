@@ -62,7 +62,8 @@ log "Registering resource providers (can take a few minutes the first time)"
 for ns in Microsoft.ContainerService Microsoft.ContainerRegistry Microsoft.DBforPostgreSQL \
           Microsoft.KeyVault Microsoft.ManagedIdentity Microsoft.Network Microsoft.Storage \
           Microsoft.Compute Microsoft.OperationalInsights Microsoft.Cdn \
-          Microsoft.Insights Microsoft.AlertsManagement Microsoft.OperationsManagement; do
+          Microsoft.Insights Microsoft.AlertsManagement Microsoft.OperationsManagement \
+          Microsoft.Monitor; do
   az provider register --namespace "$ns" --wait -o none
   echo "    $ns"
 done

@@ -99,12 +99,14 @@ cd backend && npm test
 
 ## Observability
 
-Everything reports to one Log Analytics workspace, `poc3t-law` (see
+Logs go to one Log Analytics workspace, `poc3t-law`, and metrics to an Azure Monitor
+workspace (managed Prometheus), `poc3t-amw` (see
 [infra/terraform/monitoring.tf](infra/terraform/monitoring.tf)):
 
 | What | Source | Where to look |
 | ---- | ------ | ------------- |
-| Node and pod CPU and memory, restarts, Kubernetes events | Container Insights (AKS monitoring add-on, every 5 min) | AKS > Monitoring > Insights |
+| Node, pod and container CPU, memory, network, disk; Kubernetes object state | Managed Prometheus (`ama-metrics` pods scrape cAdvisor, kubelet, node-exporter, kube-state-metrics) | AKS > Monitoring > Dashboards with Grafana, or Insights |
+| Pod status and restarts, Kubernetes events | Container Insights (AKS monitoring add-on, every 5 min) | AKS > Monitoring > Insights |
 | Container stdout/stderr (nginx access logs, backend output) | Container Insights, `ContainerLogV2` table (Basic plan) | AKS > Monitoring > Logs, or live under Insights > Containers |
 | Backend requests, SQL calls, exceptions, application map | Application Insights `poc3t-appi`, sent by OpenTelemetry in the backend | Application Insights > Application map / Failures / Performance / Live metrics |
 | Edge requests and failed origin probes | Front Door diagnostic logs | Log Analytics, `AzureDiagnostics` |
@@ -139,6 +141,13 @@ AzureDiagnostics
 | project TimeGenerated, Message
 ```
 
+Grafana dashboards: open the cluster in the Azure portal, then **Monitoring > Dashboards
+with Grafana**. The prebuilt Kubernetes dashboards (Compute Resources by cluster,
+namespace, pod, node; Kubelet; Networking) read from `poc3t-amw` and need no Grafana
+instance. They rely on the recording rules in
+[prometheus_rules.tf](infra/terraform/prometheus_rules.tf). Ad hoc PromQL: `poc3t-amw` >
+Prometheus explorer.
+
 `ContainerLogV2` is a Basic-plan table: query it on its own (`ContainerLogV2 | where
 PodNamespace == "poc3t"`), not through `union *` or joins with other tables. Outside the
 portal it needs the `/search` API rather than `/query`.
@@ -170,5 +179,5 @@ bootstrap.
 6. Observability
    - ✅ Log Analytics, Container Insights, diagnostic settings (Front Door, PostgreSQL, Key Vault, AKS)
    - ✅ Application Insights via OpenTelemetry in the backend
-   - Managed Prometheus + Grafana dashboards
+   - ✅ Managed Prometheus + Grafana dashboards (Azure portal)
    - Alert rules + email action group

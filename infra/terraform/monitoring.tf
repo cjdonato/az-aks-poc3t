@@ -1,10 +1,14 @@
-# Observability: one Log Analytics workspace that everything reports to.
-#   - Container Insights: node/pod metrics, Kubernetes events, container stdout/stderr
+# Observability.
+# Logs go to one Log Analytics workspace:
+#   - Container Insights: container stdout/stderr, Kubernetes events, pod inventory
 #   - Diagnostic settings: Front Door, PostgreSQL, Key Vault and AKS control-plane logs
 #   - Application Insights (workspace-based): backend requests, SQL calls, exceptions
+# Metrics go to an Azure Monitor workspace (managed Prometheus): node, pod and
+# Kubernetes object metrics, shown by the Grafana dashboards in the Azure portal.
 #
-# Ingestion is the main cost, so the workspace has a daily cap, container logs use the
-# cheaper Basic table plan, and Container Insights collects every 5 minutes.
+# Ingestion is the main cost, so the Log Analytics workspace has a daily cap, container
+# logs use the cheaper Basic table plan, and Container Insights only collects logs and
+# events (CPU/memory come from Prometheus instead of being paid for twice).
 
 resource "azurerm_log_analytics_workspace" "main" {
   name                = "${var.prefix}-law"
@@ -27,7 +31,16 @@ resource "azurerm_log_analytics_workspace_table" "container_logs" {
 
 # --- Container Insights -----------------------------------------------------------
 # The AKS monitoring add-on (oms_agent in aks.tf) authenticates with its managed
-# identity and sends what this data collection rule asks for.
+# identity and sends what this data collection rule asks for: the "Logs and events"
+# preset, since managed Prometheus below covers performance metrics.
+
+locals {
+  container_insights_streams = [
+    "Microsoft-ContainerLogV2",
+    "Microsoft-KubeEvents",
+    "Microsoft-KubePodInventory",
+  ]
+}
 
 resource "azurerm_monitor_data_collection_rule" "container_insights" {
   name                = "MSCI-${var.prefix}-aks"
@@ -44,7 +57,7 @@ resource "azurerm_monitor_data_collection_rule" "container_insights" {
   }
 
   data_flow {
-    streams      = ["Microsoft-ContainerInsights-Group-Default"]
+    streams      = local.container_insights_streams
     destinations = ["workspace"]
   }
 
@@ -52,10 +65,10 @@ resource "azurerm_monitor_data_collection_rule" "container_insights" {
     extension {
       name           = "ContainerInsightsExtension"
       extension_name = "ContainerInsights"
-      streams        = ["Microsoft-ContainerInsights-Group-Default"]
+      streams        = local.container_insights_streams
       extension_json = jsonencode({
         dataCollectionSettings = {
-          # 1m is the default; 5m cuts perf/inventory volume about fivefold.
+          # 1m is the default; 5m cuts pod inventory volume about fivefold.
           interval               = "5m"
           namespaceFilteringMode = "Off"
           enableContainerLogV2   = true
@@ -70,6 +83,62 @@ resource "azurerm_monitor_data_collection_rule_association" "container_insights"
   target_resource_id      = azurerm_kubernetes_cluster.main.id
   data_collection_rule_id = azurerm_monitor_data_collection_rule.container_insights.id
   description             = "Sends Container Insights data from ${var.prefix}-aks to ${var.prefix}-law."
+}
+
+# --- Managed Prometheus -------------------------------------------------------------
+# The metrics add-on (monitor_metrics in aks.tf) runs ama-metrics pods that scrape
+# cAdvisor, kubelet, node-exporter and kube-state-metrics, and remote-write to this
+# workspace through the endpoint and rule below. Recording rules: prometheus_rules.tf.
+
+resource "azurerm_monitor_workspace" "main" {
+  name                = "${var.prefix}-amw"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  tags                = local.tags
+}
+
+resource "azurerm_monitor_data_collection_endpoint" "prometheus" {
+  name                = "MSProm-${local.location}-${azurerm_kubernetes_cluster.main.name}"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  kind                = "Linux"
+  tags                = local.tags
+}
+
+resource "azurerm_monitor_data_collection_rule" "prometheus" {
+  name                        = "MSProm-${local.location}-${azurerm_kubernetes_cluster.main.name}"
+  location                    = local.location
+  resource_group_name         = data.azurerm_resource_group.main.name
+  data_collection_endpoint_id = azurerm_monitor_data_collection_endpoint.prometheus.id
+  kind                        = "Linux"
+  description                 = "Managed Prometheus for ${azurerm_kubernetes_cluster.main.name}"
+  tags                        = local.tags
+
+  destinations {
+    monitor_account {
+      name               = "MonitoringAccount1"
+      monitor_account_id = azurerm_monitor_workspace.main.id
+    }
+  }
+
+  data_flow {
+    streams      = ["Microsoft-PrometheusMetrics"]
+    destinations = ["MonitoringAccount1"]
+  }
+
+  data_sources {
+    prometheus_forwarder {
+      name    = "PrometheusDataSource"
+      streams = ["Microsoft-PrometheusMetrics"]
+    }
+  }
+}
+
+resource "azurerm_monitor_data_collection_rule_association" "prometheus" {
+  name                    = "MSProm-${local.location}-${azurerm_kubernetes_cluster.main.name}"
+  target_resource_id      = azurerm_kubernetes_cluster.main.id
+  data_collection_rule_id = azurerm_monitor_data_collection_rule.prometheus.id
+  description             = "Sends managed Prometheus metrics from ${azurerm_kubernetes_cluster.main.name} to ${azurerm_monitor_workspace.main.name}."
 }
 
 # --- Diagnostic settings ------------------------------------------------------------
