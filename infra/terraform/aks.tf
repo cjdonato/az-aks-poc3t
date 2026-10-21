@@ -76,6 +76,13 @@ resource "azurerm_kubernetes_cluster" "main" {
     secret_rotation_enabled = true
   }
 
+  # Container Insights agent. It authenticates with its managed identity; what it
+  # collects is set by the data collection rule in monitoring.tf.
+  oms_agent {
+    log_analytics_workspace_id      = azurerm_log_analytics_workspace.main.id
+    msi_auth_for_monitoring_enabled = true
+  }
+
   tags = local.tags
 
   depends_on = [azurerm_role_assignment.aks_network]

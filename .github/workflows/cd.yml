@@ -143,6 +143,7 @@ jobs:
             --set frontend.service.dnsLabel="$TF_FRONTEND_DNS_LABEL" \
             --set frontDoor.enabled="$TF_FRONT_DOOR_ENABLED" \
             --set frontDoor.id="$TF_FRONT_DOOR_ID" \
+            --set-string telemetry.connectionString="$TF_APPLICATIONINSIGHTS_CONNECTION_STRING" \
             --rollback-on-failure --timeout 10m
       - name: Show pods on failure
         if: failure() && steps.tf.outputs.provisioned == 'true'

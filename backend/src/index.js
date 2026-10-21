@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { createDb, withRetry } from './db.js';
+import { shutdownTelemetry } from './telemetry.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const db = createDb();
@@ -20,6 +21,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     console.log(`${signal} received, shutting down`);
     server.close(async () => {
       await db.pool.end();
+      await shutdownTelemetry().catch((err) => console.warn(`telemetry flush failed: ${err.message}`));
       process.exit(0);
     });
   });

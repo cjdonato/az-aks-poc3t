@@ -13,6 +13,14 @@ provider "azurerm" {
       purge_soft_delete_on_destroy    = false
       recover_soft_deleted_key_vaults = false
     }
+    application_insights {
+      # Don't leave the auto-created "Failure Anomalies" alert rule behind on destroy.
+      disable_generated_rule = true
+    }
+    log_analytics_workspace {
+      # Skip the 14-day soft delete so destroy really removes the workspace.
+      permanently_delete_on_destroy = true
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 import os from 'node:os';
 import express from 'express';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 
 // The app takes its data-access layer as a dependency so tests can run without Postgres.
 export function createApp({ db, version = process.env.APP_VERSION ?? 'dev' }) {
@@ -62,6 +63,11 @@ export function createApp({ db, version = process.env.APP_VERSION ?? 'dev' }) {
   // Express recognises error handlers by their 4-argument signature, so keep _next.
   app.use((err, _req, res, _next) => {
     console.error(err);
+    // Shows up in Application Insights as an exception on the failed request
+    // (a no-op when telemetry isn't enabled).
+    const span = trace.getActiveSpan();
+    span?.recordException(err);
+    span?.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
     res.status(500).json({ error: 'internal server error' });
   });
 

@@ -72,6 +72,8 @@ jobs:
           helm template poc3t deploy/helm/poc3t "${placeholders[@]}" --set gateway.enabled=true > /dev/null
           helm template poc3t deploy/helm/poc3t "${placeholders[@]}" \
             --set frontDoor.enabled=true --set frontDoor.id=ci --set frontend.service.dnsLabel=ci > /dev/null
+          helm template poc3t deploy/helm/poc3t "${placeholders[@]}" \
+            --set-string 'telemetry.connectionString=InstrumentationKey=ci;IngestionEndpoint=https://example/' > /dev/null
 
   images:
     name: Build ${{ matrix.app }} image

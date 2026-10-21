@@ -17,8 +17,13 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
                                   │                     postgres-app-password
                                   ├─ poc3t-backend-id   SA poc3t/backend; reads app password only
                                   ├─ poc3t-migrate-id   SA poc3t/db-migrate; reads both passwords
-                                  └─ poc3t-afd          Front Door Standard: https://<endpoint>.azurefd.net
-                                                        -> frontend LB (<label>.<region>.cloudapp.azure.com)
+                                  ├─ poc3t-afd          Front Door Standard: https://<endpoint>.azurefd.net
+                                  │                     -> frontend LB (<label>.<region>.cloudapp.azure.com)
+                                  ├─ poc3t-law          Log Analytics: Container Insights + diagnostic
+                                  │                     logs (AFD, Postgres, Key Vault, AKS), 0.5 GB/day cap
+                                  ├─ MSCI-poc3t-aks     Container Insights data collection rule
+                                  └─ poc3t-appi         Application Insights (in poc3t-law), Entra auth
+                                                        only; poc3t-backend-id may publish
 
 Database access: the backend connects as `app_user` (SELECT/INSERT/UPDATE/DELETE only).
 The `db-migrate` Helm hook runs before each deploy as `pgadmin`: it applies migrations and
@@ -33,6 +38,10 @@ Requires `az login` as a subscription Owner, `gh auth login`, and an existing Gi
 ```sh
 ./infra/bootstrap.sh <owner>/<repo>
 ```
+
+It's safe to re-run, for example when a new feature needs another resource provider
+(monitoring added `Microsoft.Insights`, `Microsoft.AlertsManagement` and
+`Microsoft.OperationsManagement`). The CI identity can't register providers itself.
 
 This creates the state storage, the CI identity with OIDC federated credentials
 (`main` branch, pull requests, `dev` environment), role assignments for CI and for you,
@@ -68,12 +77,20 @@ small VM size (`NotAvailableForSubscription`). Defaults are the smallest sizes t
 | PostgreSQL          | B_Standard_B1ms, 32 GB         | ~$17/month                  |
 | Container registry  | Basic                          | ~$5/month                   |
 | Key Vault, VNet, DNS | Standard                      | < $1/month                  |
+| Log Analytics + App Insights | Pay per GB ingested, 0.5 GB/day cap | ~$0–5/month at PoC traffic; at most ~$30/month if the cap is hit daily |
 
 Destroying the stack between demos stops almost all of it; the bootstrap resources
 (state storage + identity) cost cents.
 
 Useful variables (`terraform.tfvars` or `-var`): `node_vm_size`, `node_count`,
-`enable_gateway_api` (needs bigger or more nodes), `enable_front_door`, `postgres_sku`.
+`enable_gateway_api` (needs bigger or more nodes), `enable_front_door`, `postgres_sku`,
+`log_analytics_daily_quota_gb`, `postgres_slow_query_ms`.
+
+Monitoring costs are mostly log ingestion. The first 5 GB per month is free per billing
+account, container logs go to a Basic-plan table (a fraction of the Analytics price), and
+Container Insights collects every 5 minutes instead of every minute. Once the daily cap is
+reached, the workspace drops new data until midnight UTC. The Container Insights agent
+(`ama-logs` pods in `kube-system`) also takes roughly 0.2 vCPU and 0.5 GiB of the node.
 
 ## HTTPS via Azure Front Door
 
@@ -146,6 +163,9 @@ workflow token, fork approval) are harmless to keep.
   when the first VNet appears in the region. Other projects may use the same resource group,
   so only disable this region's watcher:
   `az network watcher configure -g NetworkWatcherRG -l swedencentral --enabled false`.
+- **Application Insights smart detection**: creating Application Insights can add an
+  "Application Insights Smart Detection" action group to `poc3t-rg` outside Terraform.
+  It's deleted with the resource group in step 2.
 - **Resource provider registrations** (`Microsoft.ContainerService`, `Microsoft.Cdn`, ...):
   free, and other workloads may rely on them; leave them registered.
 - **Local files**: `rm -rf infra/terraform/.terraform`.

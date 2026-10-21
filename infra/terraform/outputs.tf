@@ -111,3 +111,10 @@ output "frontend_dns_label" {
   value     = local.frontend_dns_label
   sensitive = true
 }
+
+# Backend telemetry target. Not a credential (key auth is disabled; the backend uses
+# its workload identity), but it identifies the resource, so it's kept out of logs.
+output "applicationinsights_connection_string" {
+  value     = azurerm_application_insights.main.connection_string
+  sensitive = true
+}

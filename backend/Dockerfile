@@ -12,4 +12,5 @@ COPY migrations ./migrations
 # Run as the unprivileged user that ships with the node image.
 USER node
 EXPOSE 3000
-CMD ["node", "src/index.js"]
+# telemetry.js is preloaded so OpenTelemetry can instrument the app's ESM imports.
+CMD ["node", "--import", "./src/telemetry.js", "src/index.js"]

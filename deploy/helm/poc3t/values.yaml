@@ -24,9 +24,10 @@ frontend:
 backend:
   replicas: 2
   serviceAccountName: backend    # must match the Terraform federated credential subject
+  # The OpenTelemetry SDK roughly triples resident memory (~50 -> ~150 MiB).
   resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits: { memory: 192Mi }
+    requests: { cpu: 25m, memory: 128Mi }
+    limits: { memory: 320Mi }
 
 postgres:
   host: ""              # set by CD
@@ -54,6 +55,11 @@ migrate:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { memory: 192Mi }
+
+# Application Insights (OpenTelemetry). Empty = telemetry off. The backend sends with
+# its workload identity (workloadIdentity.backendClientId), not an instrumentation key.
+telemetry:
+  connectionString: ""  # set by CD
 
 # Optional Azure Front Door in front of the frontend LoadBalancer (Terraform
 # enable_front_door). The Service then only admits the AzureFrontDoor.Backend

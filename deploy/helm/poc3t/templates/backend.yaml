@@ -106,6 +106,15 @@ spec:
                 secretKeyRef:
                   name: backend-db
                   key: password
+            {{- with .Values.telemetry.connectionString }}
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              value: {{ . | quote }}
+            # Application Insights shows these as the cloud role (poc3t.backend) and version.
+            - name: OTEL_SERVICE_NAME
+              value: backend
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ printf "service.namespace=%s,service.version=%s" $.Chart.Name $.Values.image.tag | quote }}
+            {{- end }}
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 10
@@ -123,6 +132,10 @@ spec:
             - name: keyvault
               mountPath: /mnt/secrets
               readOnly: true
+            # The root filesystem is read-only; the Application Insights exporter keeps
+            # telemetry it couldn't send yet under the temp dir and retries later.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: keyvault
           csi:
@@ -130,3 +143,6 @@ spec:
             readOnly: true
             volumeAttributes:
               secretProviderClass: backend-keyvault
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

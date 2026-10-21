@@ -97,6 +97,51 @@ Postgres advisory lock so multiple replicas can start at once safely.
 cd backend && npm test
 ```
 
+## Observability
+
+Everything reports to one Log Analytics workspace, `poc3t-law` (see
+[infra/terraform/monitoring.tf](infra/terraform/monitoring.tf)):
+
+| What | Source | Where to look |
+| ---- | ------ | ------------- |
+| Node and pod CPU and memory, restarts, Kubernetes events | Container Insights (AKS monitoring add-on, every 5 min) | AKS > Monitoring > Insights |
+| Container stdout/stderr (nginx access logs, backend output) | Container Insights, `ContainerLogV2` table (Basic plan) | AKS > Monitoring > Logs, or live under Insights > Containers |
+| Backend requests, SQL calls, exceptions, application map | Application Insights `poc3t-appi`, sent by OpenTelemetry in the backend | Application Insights > Application map / Failures / Performance / Live metrics |
+| Edge requests and failed origin probes | Front Door diagnostic logs | Log Analytics, `AzureDiagnostics` |
+| Slow SQL (over 500 ms) and server errors | PostgreSQL diagnostic logs | Log Analytics, `AzureDiagnostics` |
+| Secret reads and changes | Key Vault audit logs | Log Analytics, `AzureDiagnostics` |
+| Cluster admin writes, Entra sign-ins to the API server | AKS control-plane logs | Log Analytics, `AKSAuditAdmin`, `AKSControlPlane` |
+
+The backend preloads [backend/src/telemetry.js](backend/src/telemetry.js)
+(`node --import`), which starts the Microsoft OpenTelemetry Distro only when
+`APPLICATIONINSIGHTS_CONNECTION_STRING` is set, so local runs and tests send nothing.
+Application Insights has key-based ingestion disabled: pods authenticate with the
+backend's workload identity (`Monitoring Metrics Publisher` on the resource).
+Kubelet probes (`/healthz`, `/readyz`) are not traced.
+
+Example queries (workspace > Logs):
+
+```kusto
+// Slowest backend operations in the last hour
+AppRequests
+| where TimeGenerated > ago(1h)
+| summarize count(), p95 = percentile(DurationMs, 95) by Name
+| order by p95 desc
+
+// Front Door responses by status code
+AzureDiagnostics
+| where Category == "FrontDoorAccessLog"
+| summarize count() by httpStatusCode_s, bin(TimeGenerated, 5m)
+
+// Slow SQL statements
+AzureDiagnostics
+| where Category == "PostgreSQLLogs" and Message has "duration:"
+| project TimeGenerated, Message
+```
+
+To keep costs predictable, the workspace has a 0.5 GB/day ingestion cap
+(`log_analytics_daily_quota_gb`) and 30-day retention.
+
 ## CI/CD
 
 | Workflow | Trigger | What it does |
@@ -118,3 +163,8 @@ bootstrap.
 3. ✅ Helm chart: deployments, services, LoadBalancer (or Gateway API), probes, Key Vault secrets
 4. ✅ GitHub Actions: CI (test/build), CD (push to ACR, `helm upgrade`), infra (plan/apply), destroy
 5. End-to-end verification and teardown
+6. Observability
+   - ✅ Log Analytics, Container Insights, diagnostic settings (Front Door, PostgreSQL, Key Vault, AKS)
+   - ✅ Application Insights via OpenTelemetry in the backend
+   - Managed Prometheus + Grafana dashboards
+   - Alert rules + email action group

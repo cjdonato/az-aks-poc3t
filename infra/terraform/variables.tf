@@ -90,6 +90,23 @@ variable "postgres_database" {
   default     = "app"
 }
 
+variable "postgres_slow_query_ms" {
+  description = "Statements slower than this (ms) are written to the PostgreSQL logs. -1 disables."
+  type        = number
+  default     = 500
+}
+
+# --- Monitoring -----------------------------------------------------------------
+
+variable "log_analytics_daily_quota_gb" {
+  description = <<-EOT
+    Daily ingestion cap for the Log Analytics workspace (all logs, including Application
+    Insights). Ingestion stops for the rest of the UTC day once reached. -1 = no cap.
+  EOT
+  type        = number
+  default     = 0.5
+}
+
 # --- Application ----------------------------------------------------------------
 
 variable "app_namespace" {
