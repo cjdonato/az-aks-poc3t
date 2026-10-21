@@ -4,6 +4,9 @@
 # Behind Azure Front Door, only accept requests carrying our profile's X-Azure-FDID
 # (the AzureFrontDoor.Backend service tag alone also admits other Front Door
 # customers). FRONT_DOOR_ID empty = check disabled.
+# The "<id>:<id>" key is 73 characters; the default bucket size is the CPU cache line
+# (64 bytes on most nodes), which is too small and stops nginx from starting.
+map_hash_bucket_size 128;
 map "${FRONT_DOOR_ID}:$http_x_azure_fdid" $front_door_denied {
     default                             1;
     "~^:"                               0;
