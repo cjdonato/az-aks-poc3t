@@ -36,6 +36,8 @@ jobs:
       TF_INPUT: "false"
     defaults:
       run:
+        # Explicit bash adds -o pipefail, so a failed destroy isn't masked by `| sed`.
+        shell: bash
         working-directory: infra/terraform
     steps:
       - uses: actions/checkout@v7

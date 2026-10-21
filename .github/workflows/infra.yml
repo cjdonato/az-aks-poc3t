@@ -31,6 +31,9 @@ env:
 
 defaults:
   run:
+    # Explicit bash adds -o pipefail, so `terraform ... | sed` fails when terraform does
+    # (the implicit default shell is plain `bash -e`, which only sees sed's status).
+    shell: bash
     working-directory: infra/terraform
 
 jobs:

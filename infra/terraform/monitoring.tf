@@ -27,6 +27,9 @@ resource "azurerm_log_analytics_workspace_table" "container_logs" {
   name         = "ContainerLogV2"
   workspace_id = azurerm_log_analytics_workspace.main.id
   plan         = "Basic"
+  # Basic tables keep 30 days interactive. Set explicitly: left unset, the provider
+  # sends an empty value on every later apply, which Azure rejects (InvalidParameter).
+  total_retention_in_days = 30
 }
 
 # --- Container Insights -----------------------------------------------------------
