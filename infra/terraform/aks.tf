@@ -83,13 +83,40 @@ resource "azurerm_kubernetes_cluster" "main" {
     msi_auth_for_monitoring_enabled = true
   }
 
-  # Managed Prometheus agent (ama-metrics). Where it sends is set by the data
-  # collection rule in monitoring.tf. No extra pod annotations/labels are exported.
-  monitor_metrics {}
+  # Managed Prometheus (monitor_metrics) is switched on by azapi_update_resource.metrics
+  # below, once its data collection rule is associated with the cluster.
 
   tags = local.tags
 
+  lifecycle {
+    ignore_changes = [monitor_metrics]
+  }
+
   depends_on = [azurerm_role_assignment.aks_network]
+}
+
+# Managed Prometheus agent (ama-metrics). Enabled here rather than with a
+# monitor_metrics block on the cluster so it starts only after its data collection
+# rule association exists: agents that start first find no config, drop every
+# sample and don't recover until restarted. No extra pod annotations/labels exported.
+resource "azapi_update_resource" "metrics" {
+  type        = "Microsoft.ContainerService/managedClusters@2026-03-01"
+  resource_id = azurerm_kubernetes_cluster.main.id
+  body = {
+    properties = {
+      azureMonitorProfile = {
+        metrics = {
+          enabled = true
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    azurerm_monitor_data_collection_rule_association.prometheus,
+    # One cluster update at a time; AKS rejects concurrent operations.
+    azapi_update_resource.gateway_api,
+  ]
 }
 
 # Optional: managed Gateway API CRDs + app-routing Istio implementation.

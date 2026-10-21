@@ -73,6 +73,7 @@ spec:
         checksum/keyvault: {{ printf "%s/%s" .Values.keyVault.name .Values.keyVault.appPasswordSecretName | sha256sum | trunc 16 }}
     spec:
       serviceAccountName: {{ .Values.backend.serviceAccountName }}
+      {{- include "poc3t.spreadAcrossNodes" "backend" | nindent 6 }}
       securityContext:
         runAsUser: 1000   # "node" user in the node:alpine image
         runAsGroup: 1000

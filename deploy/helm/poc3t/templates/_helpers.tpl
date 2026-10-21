@@ -26,3 +26,20 @@ seccompProfile:
 {{- $name := index . 1 -}}
 {{- required (printf "%s must be set (CD fills it from Terraform outputs)" $name) $v -}}
 {{- end -}}
+
+{{/*
+Replicas of one deployment go on different nodes, so losing a node (or an eviction
+storm on it) never takes a whole tier down. Only pods of the same revision are
+counted (pod-template-hash), so rolling updates aren't blocked by the old pods.
+*/}}
+{{- define "poc3t.spreadAcrossNodes" -}}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: {{ . }}
+    matchLabelKeys:
+      - pod-template-hash
+{{- end -}}

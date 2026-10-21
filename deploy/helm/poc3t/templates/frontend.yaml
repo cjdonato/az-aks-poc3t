@@ -45,6 +45,7 @@ spec:
         app.kubernetes.io/name: frontend
         {{- include "poc3t.labels" . | nindent 8 }}
     spec:
+      {{- include "poc3t.spreadAcrossNodes" "frontend" | nindent 6 }}
       securityContext:
         runAsUser: 101    # "nginx" user in nginx-unprivileged
         runAsGroup: 101

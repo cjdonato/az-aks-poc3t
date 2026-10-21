@@ -8,7 +8,7 @@ poc3t-tfstate-rg                 poc3t-rg (Terraform)
  ├─ poc3ttfstate<hash>            ├─ poc3t-vnet
  │   └─ tfstate/poc3t.tfstate     │   ├─ snet-aks       10.10.0.0/22
  └─ poc3t-github-ci               │   └─ snet-postgres  10.10.8.0/24 (delegated)
-                                  ├─ poc3t-aks          2 × Standard_D2als_v6, CNI overlay,
+                                  ├─ poc3t-aks          3 × Standard_D2als_v6, CNI overlay,
                                   │                     Entra ID + Azure RBAC, workload identity,
                                   │                     Key Vault CSI driver
                                   ├─ poc3tacr<sfx>      Basic, AcrPull for the kubelet identity
@@ -74,7 +74,7 @@ small VM size (`NotAvailableForSubscription`). Defaults are the smallest sizes t
 | Resource            | Default                        | Approx. cost (running 24/7) |
 | ------------------- | ------------------------------ | --------------------------- |
 | AKS control plane   | Free tier                      | $0                          |
-| AKS nodes           | 2 × Standard_D2als_v6, 32 GB OS disk | ~$130/month           |
+| AKS nodes           | 3 × Standard_D2als_v6, 32 GB OS disk | ~$195/month           |
 | Load balancer + IP  | Standard                       | ~$20/month                  |
 | Front Door          | Standard (`enable_front_door`) | ~$35/month + traffic        |
 | PostgreSQL          | B_Standard_B1ms, 32 GB         | ~$17/month                  |
@@ -97,9 +97,13 @@ Container Insights only collects logs, events and pod inventory every 5 minutes;
 CPU/memory come from managed Prometheus, which is priced per sample rather than per GB.
 Once the daily cap is reached, the workspace drops new data until midnight UTC.
 
-The two monitoring agents need room: `ama-logs` (Container Insights) takes roughly
-0.2 vCPU and 0.5 GiB, `ama-metrics` (Prometheus) roughly 0.25 vCPU and 0.8 GiB. With the
-system pods that doesn't fit next to the app on one D2als_v6, hence two nodes.
+The monitoring agents need room. Per node: `ama-logs` (Container Insights) ~0.6 GiB,
+`ama-metrics-node` ~0.2 GiB and `retina-agent` (network metrics) 0.2 GiB; per cluster:
+two `ama-metrics` collectors (its autoscaler's minimum) at ~0.5 GiB each. With the AKS
+system pods that's ~5.5 GiB of requests, which fills two D2als_v6 (2.8 GiB allocatable
+each), hence three. The app's frontend and backend replicas are spread across nodes.
+Three nodes use 6 of the 10-vCPU regional quota, leaving room for the surge node during
+upgrades; two D4als_v6 would not (8 + 4 during the node pool rotation).
 
 ## HTTPS via Azure Front Door
 
